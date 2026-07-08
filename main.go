@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -31,6 +32,25 @@ var staticFS embed.FS
 //
 //go:embed views/*.html
 var viewsFS embed.FS
+
+// requestTimeout é o orçamento SERVER-SIDE de cada request (Fase 3). O cliente
+// de terminal já desiste em 250ms; sem deadline no servidor, o handler órfão
+// continuaria rodando e, com o banco travado por um processo externo, os órfãos
+// se empilhariam (busy_timeout segura cada um por até 5s). Com o deadline no
+// context, o modernc interrompe a query no ponto em que ela estiver.
+const requestTimeout = 2 * time.Second
+
+// maxHeartbeatBatch limita o lote do POST /heartbeat. O plugin coalesce por
+// arquivo e raramente passa de dezenas; um lote maior que isto é cliente
+// bugado ou abuso, e recusamos antes de abrir transação.
+const maxHeartbeatBatch = 1000
+
+// heartbeatPayload é o envelope JSON do POST /heartbeat (contrato com o
+// focusd.nvim; ver Heartbeat em db.go para o formato de cada item).
+type heartbeatPayload struct {
+	Source     string      `json:"source"`
+	Heartbeats []Heartbeat `json:"heartbeats"`
+}
 
 // env devolve o valor da variável de ambiente {key} ou {fallback} se vazia.
 // Mantém os defaults históricos (focus.db / :8080) — zero breaking change.
@@ -77,12 +97,12 @@ func isHTMX(c echo.Context) bool {
 }
 
 // focusStatusPayload monta o estado atual de foco (hábitos + sessão ativa).
-func focusStatusPayload(store *Store) (focusStatusData, error) {
-	habits, err := store.GetHabits()
+func focusStatusPayload(ctx context.Context, store *Store) (focusStatusData, error) {
+	habits, err := store.GetHabits(ctx)
 	if err != nil {
 		return focusStatusData{}, err
 	}
-	active, err := store.GetActiveFocus()
+	active, err := store.GetActiveFocus(ctx)
 	if err != nil {
 		return focusStatusData{}, err
 	}
@@ -104,7 +124,7 @@ func focusStatusPayload(store *Store) (focusStatusData, error) {
 
 // renderFocusStatus devolve o fragmento HTML do painel de foco (HTMX).
 func renderFocusStatus(c echo.Context, store *Store) error {
-	d, err := focusStatusPayload(store)
+	d, err := focusStatusPayload(c.Request().Context(), store)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -112,13 +132,27 @@ func renderFocusStatus(c echo.Context, store *Store) error {
 }
 
 func main() {
+	// Instância única (flock): se outro focusd já roda, saímos limpos e
+	// SILENCIOSOS (exit 0). É disto que o autospawn dos clientes depende —
+	// dois disparos simultâneos: um vence o lock, o outro sai sem ruído.
+	lock, err := acquireSingleton(lockPath())
+	if err != nil {
+		os.Exit(0)
+	}
+	defer lock.Close()
+
+	// Log rotativo ANTES de qualquer coisa que possa logar: o daemon é
+	// invisível, NUNCA cospe no terminal do usuário. Tudo vai para o arquivo.
+	logw := newRotatingLogger()
+	silenceStdlog(logw)
+
 	// Config por ambiente:
 	//   FOCUSD_DB   — caminho do banco SQLite (default: focus.db no CWD)
-	//   FOCUSD_ADDR — endereço de escuta (default: SOMENTE loopback — produto
-	//                 local-first não expõe a API na rede; quem precisar expor
-	//                 opta explicitamente via FOCUSD_ADDR)
+	//   FOCUSD_SOCK — caminho do Unix socket (default: $XDG_RUNTIME_DIR/focusd/)
+	//   FOCUSD_ADDR — TCP OPCIONAL para a UI de navegador. VAZIO por padrão:
+	//                 o canal de IPC agora é o socket Unix; TCP é opt-in.
 	dbPath := env("FOCUSD_DB", "focus.db")
-	addr := env("FOCUSD_ADDR", "127.0.0.1:8080")
+	tcpAddr := os.Getenv("FOCUSD_ADDR")
 
 	store, err := NewStore(dbPath)
 	if err != nil {
@@ -132,21 +166,39 @@ func main() {
 	}
 
 	e := echo.New()
+	e.HideBanner = true // nada de banner ASCII no stdout: daemon silencioso
+	e.HidePort = true
+	e.Logger.SetOutput(logw) // logger interno do echo → arquivo rotativo
 	e.Renderer = t
 	// Logger com Skipper: os endpoints de polling (tmux a cada 1s, lualine a
 	// cada 5s, HTMX a cada 15s) gerariam ~110k linhas/dia de ruído num daemon
-	// que roda para sempre. Loga só o que é mutação/página.
+	// que roda para sempre. Loga só o que é mutação/página, e no arquivo.
 	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
+		Output: logw,
 		Skipper: func(c echo.Context) bool {
-			return c.Path() == "/status" || c.Path() == "/focus/status"
+			return c.Path() == "/status" || c.Path() == "/focus/status" || c.Path() == "/heartbeat"
 		},
 	}))
 	e.Use(middleware.Recover())
 
+	// Timeout server-side (Fase 3): todo request nasce com deadline, e esse
+	// context viaja até o Store (QueryContext/ExecContext). Não usamos o
+	// middleware.Timeout do echo (que troca de goroutine e responde 503 por
+	// cima do handler — fonte conhecida de data race): aqui só armamos o
+	// deadline; quem aborta é a própria query, no ponto em que estiver.
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			ctx, cancel := context.WithTimeout(c.Request().Context(), requestTimeout)
+			defer cancel()
+			c.SetRequest(c.Request().WithContext(ctx))
+			return next(c)
+		}
+	})
+
 	// GET / — renderiza a página completa com a lista atual de hábitos e o
 	// estado de foco corrente.
 	e.GET("/", func(c echo.Context) error {
-		d, err := focusStatusPayload(store)
+		d, err := focusStatusPayload(c.Request().Context(), store)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
@@ -165,7 +217,7 @@ func main() {
 
 	// GET /habits — retorna apenas o fragmento da lista de hábitos.
 	e.GET("/habits", func(c echo.Context) error {
-		habits, err := store.GetHabits()
+		habits, err := store.GetHabits(c.Request().Context())
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
@@ -186,14 +238,14 @@ func main() {
 			frequency = "daily"
 		}
 
-		id, err := store.CreateHabit(name, c.FormValue("description"), frequency)
+		id, err := store.CreateHabit(c.Request().Context(), name, c.FormValue("description"), frequency)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 
 		// Estado completo pós-inserção (mesma receita do DELETE): além do item
 		// novo, sincroniza via OOB tudo que depende da lista de hábitos.
-		d, err := focusStatusPayload(store)
+		d, err := focusStatusPayload(c.Request().Context(), store)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
@@ -238,12 +290,12 @@ func main() {
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "id inválido")
 		}
-		if err := store.DeleteHabit(id); err != nil {
+		if err := store.DeleteHabit(c.Request().Context(), id); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 
 		// Estado já SEM o hábito (e sem o foco, se era nele que estava ativo).
-		d, err := focusStatusPayload(store)
+		d, err := focusStatusPayload(c.Request().Context(), store)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
@@ -257,6 +309,27 @@ func main() {
 		return t.templates.ExecuteTemplate(c.Response(), "focus-status", d)
 	})
 
+	// POST /heartbeat — telemetria passiva do editor (Fase 4). O plugin coalesce
+	// os eventos em memória e manda lotes pequenos em JSON; aqui só validamos o
+	// envelope e gravamos o lote numa transação. Resposta em texto puro ("ok N"),
+	// como todo endpoint consumido por cliente de terminal.
+	e.POST("/heartbeat", func(c echo.Context) error {
+		var p heartbeatPayload
+		if err := c.Bind(&p); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "payload inválido")
+		}
+		if len(p.Heartbeats) > maxHeartbeatBatch {
+			return echo.NewHTTPError(http.StatusRequestEntityTooLarge, "lote de heartbeats grande demais")
+		}
+		if p.Source == "" {
+			p.Source = "unknown"
+		}
+		if err := store.InsertHeartbeats(c.Request().Context(), p.Source, p.Heartbeats); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		return c.String(http.StatusOK, fmt.Sprintf("ok %d", len(p.Heartbeats)))
+	})
+
 	// POST /focus — registra uma sessão de foco JÁ CONCLUÍDA (log manual/script).
 	e.POST("/focus", func(c echo.Context) error {
 		habitID, err := strconv.ParseInt(c.FormValue("habit_id"), 10, 64)
@@ -268,7 +341,7 @@ func main() {
 			return echo.NewHTTPError(http.StatusBadRequest, "duration_minutes inválido")
 		}
 
-		if _, err := store.LogFocusSession(habitID, duration); err != nil {
+		if _, err := store.LogFocusSession(c.Request().Context(), habitID, duration); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 
@@ -282,7 +355,7 @@ func main() {
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "habit_id inválido")
 		}
-		if err := store.StartFocus(habitID); err != nil {
+		if err := store.StartFocus(c.Request().Context(), habitID); err != nil {
 			if errors.Is(err, ErrFocusActive) {
 				// Navegador: apenas reflete o estado ativo já existente (idempotente
 				// na UI). Terminal: 409 com a mensagem.
@@ -304,7 +377,7 @@ func main() {
 		if isHTMX(c) {
 			return renderFocusStatus(c, store)
 		}
-		active, err := store.GetActiveFocus()
+		active, err := store.GetActiveFocus(c.Request().Context())
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
@@ -313,7 +386,7 @@ func main() {
 
 	// POST /focus/stop — encerra a sessão ativa, grava a duração e limpa o estado.
 	e.POST("/focus/stop", func(c echo.Context) error {
-		duration, habitID, err := store.StopFocus()
+		duration, habitID, err := store.StopFocus(c.Request().Context())
 		if err != nil {
 			if errors.Is(err, ErrNoActiveFocus) {
 				if isHTMX(c) {
@@ -332,7 +405,7 @@ func main() {
 	// GET /status — endpoint ultra-leve em texto puro para a barra de status.
 	// Ex.: "🎯 Foco: 15m" ou "Nenhum foco ativo".
 	e.GET("/status", func(c echo.Context) error {
-		active, err := store.GetActiveFocus()
+		active, err := store.GetActiveFocus(c.Request().Context())
 		if err != nil {
 			return c.String(http.StatusOK, "Nenhum foco ativo")
 		}
@@ -342,22 +415,53 @@ func main() {
 	// Graceful shutdown: SIGINT/SIGTERM (o `focusd stop` manda SIGTERM) drenam as
 	// requisições em voo e devolvem o controle ao main, onde o defer store.Close()
 	// fecha os statements e a conexão — o driver faz o checkpoint final do WAL.
-	// (O log.Fatal antigo chamava os.Exit e PULAVA os defers.)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Sentinela de time-jump (Fase 3): desconta hibernação/sleep da sessão
+	// ativa. Vive amarrada ao ctx do shutdown — morre junto com o daemon.
+	go watchClockJumps(ctx, store)
+
+	// Listener PRIMÁRIO: Unix domain socket 0600. Substitui o TCP como canal
+	// de IPC — zero colisão de porta, permissão via filesystem (só o dono fala).
+	sock := socketPath()
+	unixL, err := listenUnix(sock)
+	if err != nil {
+		log.Fatalf("socket unix: %v", err)
+	}
+
+	// Um único http.Server atende N listeners (socket sempre, TCP opcional).
+	srv := &http.Server{Handler: e}
+
 	go func() {
-		if err := e.Start(addr); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("servidor: %v", err)
-			stop() // falha de bind também encerra o daemon de forma ordenada
+		if err := srv.Serve(unixL); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("socket serve: %v", err)
+			stop()
 		}
 	}()
+
+	// TCP OPCIONAL: só quando FOCUSD_ADDR está setado (ex.: abrir a UI web).
+	if tcpAddr != "" {
+		if tcpL, err := net.Listen("tcp", tcpAddr); err != nil {
+			log.Printf("tcp %s: %v", tcpAddr, err)
+		} else {
+			go func() {
+				if err := srv.Serve(tcpL); err != nil && !errors.Is(err, http.ErrServerClosed) {
+					log.Printf("tcp serve: %v", err)
+				}
+			}()
+			log.Printf("UI de navegador em http://%s", tcpAddr)
+		}
+	}
+
+	log.Printf("focusd no ar · socket %s · db %s", sock, dbPath)
 
 	<-ctx.Done()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := e.Shutdown(shutdownCtx); err != nil {
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
 	}
+	_ = os.Remove(sock) // limpa o socket ao sair, sem deixar arquivo órfão
 	log.Println("focusd encerrado")
 }
