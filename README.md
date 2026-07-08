@@ -59,6 +59,25 @@ construction: a minute counts only if it actually received activity — no
 extrapolation, no vanity numbers. Same output over HTTP:
 `curl --unix-socket <sock> http://localhost/report`.
 
+## Interactive dashboard
+
+```sh
+focusd tui
+```
+
+A live terminal dashboard (bubbletea), refreshed every 2s over the unix
+socket:
+
+- **dashboard** — streak, today/window totals, the live focus session and a
+  daily activity chart
+- **projects** — the project × language report, window switchable between
+  7/14/30 days
+- **sessions** — your habits; `enter` starts or stops a focus session right
+  there, live
+
+Keys: `tab`/`1-3` switch tabs · `d` cycle window · `j/k` select · `enter`
+start/stop focus · `q` quit.
+
 ## tmux
 
 Live focus timer in the status bar (prints nothing when idle — a clean bar):
