@@ -1,0 +1,422 @@
+{{define "index"}}
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>focusd — rastreador de foco</title>
+  <script src="/static/htmx.min.js"></script>
+  <style>
+    /* =====================================================================
+       focusd — design system "Catppuccin Mocha"
+       Terminal moderno, hipermídia-first. Zero JS de estilo: tudo é CSS puro
+       moldado ao motor HTMX (as tags hx-* permanecem intocadas).
+       ===================================================================== */
+    :root {
+      /* -- paleta Catppuccin Mocha -- */
+      --crust:    #11111b;
+      --mantle:   #181825;
+      --base:     #1e1e2e;
+      --surface0: #313244;
+      --surface1: #45475a;
+      --surface2: #585b70;
+      --overlay0: #6c7086;
+      --overlay1: #7f849c;
+      --subtext0: #a6adc8;
+      --subtext1: #bac2de;
+      --text:     #cdd6f4;
+
+      --mauve:    #cba6f7;
+      --pink:     #f5c2e7;
+      --red:      #f38ba8;
+      --maroon:   #eba0ac;
+      --peach:    #fab387;
+      --yellow:   #f9e2af;
+      --green:    #a6e3a1;
+      --teal:     #94e2d5;
+      --sapphire: #74c7ec;
+      --blue:     #89b4fa;
+      --lavender: #b4befe;
+
+      /* -- tokens semânticos -- */
+      --bg:      var(--base);
+      --panel:   var(--mantle);
+      --card:    #1c1c2b;
+      --fg:      var(--text);
+      --muted:   var(--overlay1);
+      --accent:  var(--mauve);
+      --focus:   var(--green);
+      --danger:  var(--red);
+      --line:    #2a2a3c;
+
+      /* -- ritmo / escala (perfeição matemática: passo 1.5) -- */
+      --sp-1: .35rem;
+      --sp-2: .55rem;
+      --sp-3: .85rem;
+      --sp-4: 1.25rem;
+      --sp-5: 1.9rem;
+      --radius: 10px;
+      --radius-sm: 7px;
+      --ring: 0 0 0 2px rgba(203,166,247,.35);
+      --shadow: 0 1px 0 rgba(255,255,255,.02) inset,
+                0 8px 24px -12px rgba(0,0,0,.7);
+      --ease: cubic-bezier(.2,.7,.3,1);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background:
+        radial-gradient(1200px 600px at 15% -10%, rgba(203,166,247,.06), transparent 60%),
+        radial-gradient(900px 500px at 100% 0%, rgba(148,226,213,.05), transparent 55%),
+        var(--bg);
+      color: var(--fg);
+      font-family: "JetBrains Mono", "Fira Code", "SF Mono", Menlo, Consolas, ui-monospace, monospace;
+      font-size: 14px;
+      line-height: 1.6;
+      max-width: 780px;
+      margin: 0 auto;
+      padding: var(--sp-5) var(--sp-4) 5rem;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    ::selection { background: rgba(203,166,247,.28); color: #fff; }
+
+    /* -- cabeçalho -- */
+    h1 {
+      color: var(--accent);
+      font-weight: 700;
+      letter-spacing: .3px;
+      font-size: 1.55rem;
+      margin: 0 0 .1rem;
+      display: flex;
+      align-items: baseline;
+      gap: .1rem;
+    }
+    h1::before { content: "$"; color: var(--focus); margin-right: .5rem; font-weight: 700; }
+    h1::after {
+      content: "";
+      width: .55rem; height: 1.05rem;
+      margin-left: .15rem;
+      background: var(--accent);
+      border-radius: 1px;
+      transform: translateY(.12rem);
+      animation: caret 1.05s steps(1) infinite;
+    }
+    @keyframes caret { 50% { opacity: 0; } }
+    .lede { color: var(--muted); margin: 0 0 var(--sp-2); font-size: .85rem; }
+
+    /* -- cards de seção -- */
+    section {
+      margin-top: var(--sp-4);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.015), transparent 40%),
+        var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: var(--sp-3) var(--sp-4) var(--sp-4);
+      box-shadow: var(--shadow);
+    }
+    h2 {
+      color: var(--subtext0);
+      font-size: .72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1.6px;
+      margin: 0 0 var(--sp-3);
+      padding-bottom: var(--sp-2);
+      border-bottom: 1px solid var(--line);
+      display: flex; align-items: center; gap: .5rem;
+    }
+    h2::before {
+      content: "";
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+    }
+
+    /* -- formulários / campos -- */
+    form { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: 0; }
+    input, select, button {
+      background: var(--surface0);
+      color: var(--fg);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: .55rem .7rem;
+      font-family: inherit;
+      font-size: inherit;
+      transition: border-color .16s var(--ease), box-shadow .16s var(--ease),
+                  background .16s var(--ease), color .16s var(--ease), transform .08s var(--ease);
+    }
+    input { flex: 1 1 8rem; min-width: 0; }
+    input::placeholder { color: var(--overlay0); }
+    input:hover, select:hover { border-color: var(--surface2); }
+    input:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+
+    button {
+      color: var(--accent);
+      border-color: rgba(203,166,247,.4);
+      background: rgba(203,166,247,.08);
+      cursor: pointer;
+      font-weight: 600;
+      display: inline-flex; align-items: center; justify-content: center;
+      user-select: none;
+    }
+    button:hover { background: var(--accent); color: var(--crust); border-color: var(--accent); }
+    button:active { transform: translateY(1px); }
+    button:focus-visible { outline: none; box-shadow: var(--ring); }
+    button:disabled { opacity: .55; cursor: progress; }
+
+    /* -- lista de hábitos -- */
+    ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+    .habit {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--sp-3);
+      background: var(--surface0);
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--accent);
+      border-radius: var(--radius-sm);
+      padding: .6rem .8rem;
+      transition: border-color .16s var(--ease), transform .1s var(--ease), box-shadow .16s var(--ease);
+    }
+    .habit:hover {
+      border-color: var(--surface2);
+      border-left-color: var(--mauve);
+      transform: translateX(2px);
+      box-shadow: -6px 0 0 -3px rgba(203,166,247,.25);
+    }
+    .habit-body { min-width: 0; }               /* deixa o texto longo encolher em vez de empurrar o botão */
+    .habit .name { color: var(--fg); font-weight: 600; }
+    .habit .freq {
+      color: var(--teal);
+      margin-left: .4rem;
+      font-size: .8rem;
+      opacity: .9;
+    }
+    .habit .meta { color: var(--muted); font-size: .78rem; margin-top: .1rem; overflow: hidden; text-overflow: ellipsis; }
+    .habit .del {
+      flex: none;                              /* nunca encolhe: fica sempre legível à direita */
+      color: var(--overlay0);
+      text-decoration: none;
+      cursor: pointer;
+      padding: .2rem .45rem;
+      border-radius: 6px;
+      font-size: .8rem;
+      letter-spacing: .3px;
+      border: 1px solid transparent;
+      transition: color .14s var(--ease), background .14s var(--ease), border-color .14s var(--ease);
+    }
+    .habit .del:hover, .habit .del:focus-visible {
+      color: var(--danger);
+      background: rgba(243,139,168,.12);
+      border-color: rgba(243,139,168,.35);
+      outline: none;
+    }
+    .empty { color: var(--muted); font-style: italic; padding: .4rem .2rem; }
+
+    #focus-result { color: var(--focus); min-height: 1.4rem; margin-top: var(--sp-2); font-size: .88rem; }
+
+    /* ---------------------------------------------------------------------
+       Feedback de rede do HTMX — sem uma linha de JS.
+       .htmx-indicator fica invisível e só surge enquanto a requisição está
+       em voo (htmx injeta .htmx-request no elemento disparador).
+       --------------------------------------------------------------------- */
+    /* O indicador SEMPRE reserva seu espaço (só a opacidade anima): a largura
+       do botão não muda entre ocioso ↔ em voo — zero layout shift. */
+    .htmx-indicator { opacity: 0; transition: opacity .14s var(--ease); }
+    .htmx-request .htmx-indicator,
+    .htmx-request.htmx-indicator { opacity: 1; }
+    .spinner {
+      display: inline-block;
+      width: .8em; height: .8em;
+      margin-left: .4rem;
+      vertical-align: -.06em;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    /* varredura sutil no card enquanto ele faz polling/carrega */
+    .htmx-request.focus-panel { box-shadow: var(--shadow), var(--ring); }
+
+    /* ---------------------------------------------------------------------
+       Painel de foco ativo
+       --------------------------------------------------------------------- */
+    .focus-panel {
+      display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3);
+      background: var(--surface0);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: .8rem 1rem;
+      transition: border-color .2s var(--ease), box-shadow .2s var(--ease);
+    }
+    .focus-panel form { margin: 0; flex: 0 0 auto; margin-left: auto; }
+    .focus-panel select { flex: 1 1 12rem; }
+    .focus-panel.active {
+      border-color: rgba(166,227,161,.4);
+      border-left: 3px solid var(--focus);
+      background:
+        linear-gradient(90deg, rgba(166,227,161,.06), transparent 55%),
+        var(--surface0);
+    }
+    .focus-panel .live { color: var(--subtext1); font-size: .95rem; }
+    .focus-panel .live .name { color: var(--focus); font-weight: 700; }
+    .focus-panel .live strong { color: var(--fg); font-variant-numeric: tabular-nums; }
+    .focus-panel .idle { color: var(--muted); font-style: italic; }
+
+    /* dot pulsante — o coração visual do "cronômetro rodando" */
+    .pulse {
+      display: inline-block; width: .62em; height: .62em; margin-right: .15rem;
+      border-radius: 50%; background: var(--focus);
+      box-shadow: 0 0 0 0 var(--focus);
+      animation: pulse 1.7s var(--ease) infinite;
+    }
+    @keyframes pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(166,227,161,.55); }
+      70%  { box-shadow: 0 0 0 .55em rgba(166,227,161,0); }
+      100% { box-shadow: 0 0 0 0 rgba(166,227,161,0); }
+    }
+
+    /* botão stop — perigo controlado */
+    button.stop {
+      color: var(--danger);
+      border-color: rgba(243,139,168,.4);
+      background: rgba(243,139,168,.08);
+    }
+    button.stop:hover { background: var(--danger); color: var(--crust); border-color: var(--danger); }
+
+    /* -- respeita quem prefere menos movimento -- */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+    }
+
+    /* -- respiro em telas estreitas (tmux pane / mobile) -- */
+    @media (max-width: 560px) {
+      body { padding: var(--sp-4) var(--sp-3) 4rem; }
+      .focus-panel form { margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <h1>focusd</h1>
+  <p class="lede">rastreador de foco e hábitos, CLI-first.</p>
+
+  <section>
+    <h2>novo hábito</h2>
+    <form hx-post="/habits" hx-target="#habit-list" hx-swap="afterbegin"
+          hx-disabled-elt="find button"
+          hx-on::after-request="if(event.detail.successful) this.reset()">
+      <input type="text" name="name" placeholder="nome" required>
+      <input type="text" name="description" placeholder="descrição (opcional)">
+      <select name="frequency">
+        <option value="daily">daily</option>
+        <option value="weekly">weekly</option>
+        <option value="monthly">monthly</option>
+      </select>
+      <button type="submit">add<span class="spinner htmx-indicator"></span></button>
+    </form>
+  </section>
+
+  <section>
+    <h2>hábitos</h2>
+    <ul id="habit-list">
+      {{template "habit-list" .Habits}}
+    </ul>
+  </section>
+
+  <section>
+    <h2>foco ativo</h2>
+    {{template "focus-status" .}}
+  </section>
+
+  <section>
+    <h2>registrar foco (manual)</h2>
+    <form hx-post="/focus" hx-target="#focus-result" hx-swap="innerHTML"
+          hx-disabled-elt="find button"
+          hx-on::after-request="if(event.detail.successful) this.querySelector('input[name=duration_minutes]').value=''">
+      {{template "habit-select" .Habits}}
+      <input type="number" name="duration_minutes" placeholder="minutos" min="1" required>
+      <button type="submit">log<span class="spinner htmx-indicator"></span></button>
+    </form>
+    <div id="focus-result"></div>
+  </section>
+</body>
+</html>
+{{end}}
+
+
+{{/* ---- fragmentos reutilizáveis (renderizados isoladamente pelos handlers) ---- */}}
+
+{{define "habit-list"}}
+  {{if .}}
+    {{range .}}{{template "habit-item" .}}{{end}}
+  {{else}}
+    {{/* o id permite ao POST /habits removê-lo via hx-swap-oob="delete" */}}
+    <li class="empty" id="habit-empty">nenhum hábito ainda — adicione um acima.</li>
+  {{end}}
+{{end}}
+
+{{define "habit-item"}}
+<li class="habit" id="habit-{{.ID}}">
+  <div class="habit-body">
+    <span class="name">{{.Name}}</span>
+    <span class="freq">[{{.Frequency}}]</span>
+    {{if .Description}}<div class="meta">{{.Description}}</div>{{end}}
+  </div>
+  <a class="del" role="button" tabindex="0"
+     hx-delete="/habits/{{.ID}}"
+     hx-target="#habit-{{.ID}}"
+     hx-swap="outerHTML"
+     hx-confirm="Deletar o hábito &quot;{{.Name}}&quot;?">[Deletar]</a>
+</li>
+{{end}}
+
+{{/* Painel de foco ativo. Quando há sessão, faz auto-polling (every 15s) para
+     o timer "tickar" sozinho; quando ocioso, não faz polling para não resetar
+     o <select> enquanto o usuário escolhe. Ambos os estados trocam a si mesmos
+     (outerHTML), mantendo o id #focus-status estável entre swaps.
+     O {{if .OOB}} liga o out-of-band swap SÓ na resposta do DELETE — nos swaps
+     primários (start/stop/poll) fica desligado, senão o HTMX apagaria o painel. */}}
+{{define "focus-status"}}
+{{if .Active}}
+<div id="focus-status" class="focus-panel active"{{if .OOB}} hx-swap-oob="true"{{end}}
+     hx-get="/focus/status" hx-trigger="every 15s" hx-swap="outerHTML">
+  <span class="pulse"></span>
+  <span class="live">🎯 <span class="name">{{.HabitName}}</span> — <strong>{{.Minutes}}m</strong></span>
+  <form hx-post="/focus/stop" hx-target="#focus-status" hx-swap="outerHTML"
+        hx-disabled-elt="find button">
+    <button type="submit" class="stop">■ stop<span class="spinner htmx-indicator"></span></button>
+  </form>
+</div>
+{{else}}
+<div id="focus-status" class="focus-panel"{{if .OOB}} hx-swap-oob="true"{{end}}>
+  {{if .Habits}}
+  <form hx-post="/focus/start" hx-target="#focus-status" hx-swap="outerHTML"
+        hx-disabled-elt="find button">
+    <select name="habit_id" required>
+      {{range .Habits}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+    </select>
+    <button type="submit">▶ start<span class="spinner htmx-indicator"></span></button>
+  </form>
+  {{else}}
+  <span class="idle">nenhum foco ativo — adicione um hábito para começar.</span>
+  {{end}}
+</div>
+{{end}}
+{{end}}
+
+{{define "habit-select"}}
+<select name="habit_id" id="habit-select" hx-swap-oob="true" required>
+  {{range .}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+</select>
+{{end}}
+
+{{define "focus-result"}}
+✓ sessão de {{.}} min registrada.
+{{end}}
