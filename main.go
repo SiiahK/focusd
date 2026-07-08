@@ -418,6 +418,27 @@ func main() {
 		return c.String(http.StatusOK, statusText(active))
 	})
 
+	// GET /report — relatório de minutos ativos por projeto × linguagem, em
+	// texto puro alinhado (?days=N, default 7). O mesmo render serve curl,
+	// o subcomando `focusd report` e o GIF do README.
+	e.GET("/report", func(c echo.Context) error {
+		days, err := strconv.Atoi(c.QueryParam("days"))
+		if err != nil || days < 1 || days > 365 {
+			days = 7
+		}
+		since := time.Now().AddDate(0, 0, -days).Unix()
+		ctx := c.Request().Context()
+		rows, err := store.ActivityReport(ctx, since)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		fmin, fsess, err := store.FocusTotals(ctx, since)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		return c.String(http.StatusOK, renderReport(days, rows, fmin, fsess))
+	})
+
 	// GET /streak — dias locais consecutivos com atividade, como inteiro em
 	// texto puro. Consumido pelo hook de commit para compor a mensagem.
 	e.GET("/streak", func(c echo.Context) error {

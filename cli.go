@@ -34,6 +34,10 @@ import (
 
 const hookMarker = "# focusd post-commit hook"
 
+// version é injetada nos builds de release via ldflags (goreleaser:
+// -X main.version={{.Version}}). "dev" identifica builds locais.
+var version = "dev"
+
 func usage() {
 	fmt.Fprint(os.Stderr, `focusd — local-first focus engine
 
@@ -41,6 +45,8 @@ uso:
   focusd                     sobe o daemon (idempotente: segunda instância sai em silêncio)
   focusd init --hook         instala o hook post-commit no repositório git atual
   focusd hook post-commit    usado pelo hook instalado; registra o commit no focusd
+  focusd report [--days N]   minutos ativos por projeto × linguagem (default: 7 dias)
+  focusd version             versão do binário
 
 config por ambiente: FOCUSD_DB, FOCUSD_SOCK, FOCUSD_ADDR (UI web opcional)
 `)
@@ -53,6 +59,10 @@ func runCLI(args []string) {
 		cmdInit(args[1:])
 	case "hook":
 		cmdHook(args[1:])
+	case "report":
+		cmdReport(args[1:])
+	case "version", "--version", "-v":
+		fmt.Println("focusd " + version)
 	case "help", "--help", "-h":
 		usage()
 	default:
@@ -89,6 +99,63 @@ func cmdHook(args []string) {
 		os.Exit(2)
 	}
 	runPostCommit()
+}
+
+// cmdReport busca /report no daemon e imprime. Mesmo espírito do hook:
+// autostart se o daemon estiver frio, mas aqui falha é VISÍVEL (o usuário
+// pediu o relatório de forma explícita; silêncio seria gaslighting).
+func cmdReport(args []string) {
+	days := 7
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--days" && i+1 < len(args):
+			i++
+			a = "--days=" + args[i]
+			fallthrough
+		case strings.HasPrefix(a, "--days="):
+			n, err := strconv.Atoi(strings.TrimPrefix(a, "--days="))
+			if err != nil || n < 1 || n > 365 {
+				fmt.Fprintln(os.Stderr, "focusd report: --days precisa ser um inteiro entre 1 e 365")
+				os.Exit(2)
+			}
+			days = n
+		default:
+			fmt.Fprintf(os.Stderr, "focusd report: flag desconhecida %q\n\n", a)
+			usage()
+			os.Exit(2)
+		}
+	}
+
+	client := daemonClient()
+	url := fmt.Sprintf("http://focusd/report?days=%d", days)
+	body, ok := getText(client, url)
+	if !ok {
+		spawnDaemon()
+		for i := 0; i < 4 && !ok; i++ {
+			time.Sleep(150 * time.Millisecond)
+			body, ok = getText(client, url)
+		}
+	}
+	if !ok {
+		fmt.Fprintln(os.Stderr, "focusd report: daemon não respondeu (socket: "+socketPath()+")")
+		os.Exit(1)
+	}
+	fmt.Print(body)
+}
+
+// getText faz um GET e devolve o corpo como texto (ok=false em qualquer falha).
+func getText(client *http.Client, url string) (string, bool) {
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", false
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return "", false
+	}
+	return string(body), true
 }
 
 // findGitDir sobe a partir do cwd até achar .git. Devolve a raiz do worktree

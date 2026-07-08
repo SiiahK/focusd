@@ -200,6 +200,63 @@ func TestStreak(t *testing.T) {
 	}
 }
 
+// TestActivityReport cobre o agregador da Fase 6: minutos distintos por
+// projeto × linguagem, colapso de arquivos no mesmo minuto, corte por janela
+// temporal e os totais de foco deliberado.
+func TestActivityReport(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	now := time.Now().Unix()
+	minute := (now / 60) * 60
+
+	hbs := []Heartbeat{
+		// dois arquivos go do mesmo projeto NO MESMO minuto → 1 minuto ativo
+		{Project: "focusd", File: "a.go", Language: "go", Events: 5, At: minute},
+		{Project: "focusd", File: "b.go", Language: "go", Events: 2, At: minute + 30},
+		// minuto seguinte → +1 (total go = 2)
+		{Project: "focusd", File: "a.go", Language: "go", Events: 1, At: minute - 60},
+		// outra linguagem no mesmo projeto → linha própria
+		{Project: "focusd", File: "x.lua", Language: "lua", Events: 1, At: minute},
+		// fora da janela de 7 dias → invisível
+		{Project: "antigo", File: "z.go", Language: "go", Events: 1, At: now - 8*24*3600},
+	}
+	if err := s.InsertHeartbeats(ctx, "nvim", hbs); err != nil {
+		t.Fatalf("InsertHeartbeats: %v", err)
+	}
+	if _, err := s.LogFocusSession(ctx, mustHabit(t, s), 25); err != nil {
+		t.Fatalf("LogFocusSession: %v", err)
+	}
+
+	since := now - 7*24*3600
+	rows, err := s.ActivityReport(ctx, since)
+	if err != nil {
+		t.Fatalf("ActivityReport: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("esperava 2 linhas (go, lua), veio %d: %+v", len(rows), rows)
+	}
+	if rows[0].Project != "focusd" || rows[0].Language != "go" || rows[0].Minutes != 2 {
+		t.Fatalf("linha go errada: %+v", rows[0])
+	}
+	if rows[1].Language != "lua" || rows[1].Minutes != 1 {
+		t.Fatalf("linha lua errada: %+v", rows[1])
+	}
+
+	fmin, fsess, err := s.FocusTotals(ctx, since)
+	if err != nil || fmin != 25 || fsess != 1 {
+		t.Fatalf("FocusTotals: esperava 25m/1 sessão, veio %dm/%d (%v)", fmin, fsess, err)
+	}
+}
+
+func mustHabit(t *testing.T, s *Store) int64 {
+	t.Helper()
+	id, err := s.CreateHabit(context.Background(), "Codar", "", "daily")
+	if err != nil {
+		t.Fatalf("CreateHabit: %v", err)
+	}
+	return id
+}
+
 // TestConcurrencyNoLock martela o banco de várias goroutines para provar que
 // SetMaxOpenConns(1) + busy_timeout eliminam o "database is locked".
 func TestConcurrencyNoLock(t *testing.T) {

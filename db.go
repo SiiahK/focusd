@@ -366,6 +366,50 @@ func (s *Store) Streak(ctx context.Context) (int, error) {
 	return n, nil
 }
 
+// ActivityReport agrega minutos ativos por projeto × linguagem desde `since`
+// (unix epoch). "Minuto ativo" = minuto-calendário com ≥1 heartbeat
+// (COUNT(DISTINCT at/60)): dois arquivos tocados no mesmo minuto contam um
+// minuto só. Fora do caminho quente; sem statement preparado de propósito.
+func (s *Store) ActivityReport(ctx context.Context, since int64) ([]ReportRow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT COALESCE(NULLIF(project, ''), '(no project)') AS p,
+		       COALESCE(NULLIF(language, ''), '·') AS l,
+		       COUNT(DISTINCT at / 60) AS mins
+		FROM heartbeats
+		WHERE at >= ?
+		GROUP BY p, l
+		ORDER BY mins DESC, p, l`, since)
+	if err != nil {
+		return nil, fmt.Errorf("agregando atividade: %w", err)
+	}
+	defer rows.Close()
+
+	report := make([]ReportRow, 0)
+	for rows.Next() {
+		var r ReportRow
+		if err := rows.Scan(&r.Project, &r.Language, &r.Minutes); err != nil {
+			return nil, fmt.Errorf("lendo linha do relatório: %w", err)
+		}
+		report = append(report, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterando relatório: %w", err)
+	}
+	return report, nil
+}
+
+// FocusTotals soma as sessões de foco deliberado concluídas desde `since`.
+func (s *Store) FocusTotals(ctx context.Context, since int64) (minutes, sessions int64, err error) {
+	err = s.db.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(duration_minutes), 0), COUNT(*)
+		FROM focus_logs
+		WHERE strftime('%s', logged_at) + 0 >= ?`, since).Scan(&minutes, &sessions)
+	if err != nil {
+		return 0, 0, fmt.Errorf("somando sessões de foco: %w", err)
+	}
+	return minutes, sessions, nil
+}
+
 // clip limita campos de texto vindos da rede a um tamanho são — heartbeat é
 // telemetria, não lugar para alguém estacionar um path de 1MB no banco.
 func clip(v string) string {
