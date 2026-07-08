@@ -25,10 +25,6 @@ archives:
       - LICENSE
       - focus_status.sh
       - tmux_focus.sh
-      # os dois padrões são necessários: `*` pega o README na raiz do plugin,
-      # `**/*` pega a árvore lua/ (o ** do goreleaser não casa profundidade 1)
-      - focusd.nvim/*
-      - focusd.nvim/**/*
 
 checksum:
   name_template: checksums.txt

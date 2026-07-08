@@ -77,13 +77,13 @@ bind-key F run-shell "/path/to/focusd/tmux_focus.sh 1 25"
 
 ## Neovim
 
-[focusd.nvim](focusd.nvim/) ships in this repo: passive coding telemetry
-(coalesced heartbeats over the unix socket, zero keystroke overhead) plus a
-pure-memory statusline component.
+[focusd.nvim](https://github.com/SiiahK/focusd.nvim) lives in its own
+repository: passive coding telemetry (coalesced heartbeats over the unix
+socket, zero keystroke overhead) plus a pure-memory statusline component.
 
 ```lua
 -- lazy.nvim
-{ dir = "/path/to/focusd/focusd.nvim", event = "VeryLazy", opts = {} }
+{ "SiiahK/focusd.nvim", event = "VeryLazy", opts = {} }
 ```
 
 ## Web dashboard (optional)
