@@ -30,6 +30,8 @@ import (
 	"time"
 
 	"context"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 const hookMarker = "# focusd post-commit hook"
@@ -46,6 +48,7 @@ uso:
   focusd init --hook         instala o hook post-commit no repositório git atual
   focusd hook post-commit    usado pelo hook instalado; registra o commit no focusd
   focusd report [--days N]   minutos ativos por projeto × linguagem (default: 7 dias)
+  focusd tui                 dashboard interativo no terminal
   focusd version             versão do binário
 
 config por ambiente: FOCUSD_DB, FOCUSD_SOCK, FOCUSD_ADDR (UI web opcional)
@@ -61,6 +64,8 @@ func runCLI(args []string) {
 		cmdHook(args[1:])
 	case "report":
 		cmdReport(args[1:])
+	case "tui":
+		cmdTUI()
 	case "version", "--version", "-v":
 		fmt.Println("focusd " + version)
 	case "help", "--help", "-h":
@@ -142,6 +147,29 @@ func cmdReport(args []string) {
 		os.Exit(1)
 	}
 	fmt.Print(body)
+}
+
+// cmdTUI sobe o dashboard interativo (tui.go). Mesmo ritual do report:
+// garante daemon de pé (autostart) antes de abrir a tela.
+func cmdTUI() {
+	client := daemonClient()
+	_, ok := getText(client, "http://focusd/status")
+	if !ok {
+		spawnDaemon()
+		for i := 0; i < 4 && !ok; i++ {
+			time.Sleep(150 * time.Millisecond)
+			_, ok = getText(client, "http://focusd/status")
+		}
+	}
+	if !ok {
+		fmt.Fprintln(os.Stderr, "focusd tui: daemon não respondeu (socket: "+socketPath()+")")
+		os.Exit(1)
+	}
+	p := tea.NewProgram(newTUIModel(client), tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "focusd tui: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 // getText faz um GET e devolve o corpo como texto (ok=false em qualquer falha).
