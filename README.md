@@ -24,6 +24,9 @@ focusd init --hook   # inside any repo: every commit updates your habit & streak
 focusd               # start the daemon (clients also autostart it on demand)
 ```
 
+Prebuilt static binaries for Linux and macOS (amd64/arm64) are on the
+[releases page](https://github.com/SiiahK/focusd/releases).
+
 Every `git commit` now answers back:
 
 ```
@@ -32,6 +35,27 @@ Every `git commit` now answers back:
 
 The hook never blocks or fails a commit: hard 250ms budget, silent when the
 daemon is unreachable.
+
+## Where did my week go?
+
+Everything the integrations capture rolls up into one command:
+
+```
+$ focusd report
+focusd · last 7 days
+
+PROJECT   LANGUAGE  ACTIVE
+focusd    go          132m  ████████████████
+focusd    lua          41m  ████▉
+dotfiles  git           3m  ▎
+
+coding: 176m · deliberate focus: 25m across 1 session(s)
+```
+
+`focusd report --days 30` widens the window. The estimator is honest by
+construction: a minute counts only if it actually received activity — no
+extrapolation, no vanity numbers. Same output over HTTP:
+`curl --unix-socket <sock> http://localhost/report`.
 
 ## tmux
 
