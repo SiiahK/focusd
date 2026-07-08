@@ -398,6 +398,35 @@ func (s *Store) ActivityReport(ctx context.Context, since int64) ([]ReportRow, e
 	return report, nil
 }
 
+// DailyActivity devolve os minutos ativos por dia local desde `since` —
+// a série do gráfico de barras do TUI. Dias sem atividade não aparecem
+// (o cliente preenche as lacunas, que conhece a janela pedida).
+func (s *Store) DailyActivity(ctx context.Context, since int64) ([]apiDaily, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT date(at, 'unixepoch', 'localtime') AS d, COUNT(DISTINCT at / 60)
+		FROM heartbeats
+		WHERE at >= ?
+		GROUP BY d
+		ORDER BY d`, since)
+	if err != nil {
+		return nil, fmt.Errorf("agregando atividade diária: %w", err)
+	}
+	defer rows.Close()
+
+	daily := make([]apiDaily, 0)
+	for rows.Next() {
+		var d apiDaily
+		if err := rows.Scan(&d.Date, &d.Minutes); err != nil {
+			return nil, fmt.Errorf("lendo dia: %w", err)
+		}
+		daily = append(daily, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterando dias: %w", err)
+	}
+	return daily, nil
+}
+
 // FocusTotals soma as sessões de foco deliberado concluídas desde `since`.
 func (s *Store) FocusTotals(ctx context.Context, since int64) (minutes, sessions int64, err error) {
 	err = s.db.QueryRowContext(ctx, `

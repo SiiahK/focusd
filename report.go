@@ -14,11 +14,12 @@ import (
 	"strings"
 )
 
-// ReportRow é uma linha agregada do relatório de atividade.
+// ReportRow é uma linha agregada do relatório de atividade. As tags json
+// fazem parte do contrato do GET /api/summary (consumido pelo focusd tui).
 type ReportRow struct {
-	Project  string
-	Language string
-	Minutes  int64
+	Project  string `json:"project"`
+	Language string `json:"language"`
+	Minutes  int64  `json:"minutes"`
 }
 
 // barra desenha uma barra proporcional de até `width` células, com oitavos

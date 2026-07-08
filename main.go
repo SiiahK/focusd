@@ -182,7 +182,8 @@ func main() {
 	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
 		Output: logw,
 		Skipper: func(c echo.Context) bool {
-			return c.Path() == "/status" || c.Path() == "/focus/status" || c.Path() == "/heartbeat"
+			return c.Path() == "/status" || c.Path() == "/focus/status" ||
+				c.Path() == "/heartbeat" || c.Path() == "/api/summary"
 		},
 	}))
 	e.Use(middleware.Recover())
@@ -437,6 +438,52 @@ func main() {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 		return c.String(http.StatusOK, renderReport(days, rows, fmin, fsess))
+	})
+
+	// GET /api/summary — um frame completo do dashboard (focusd tui) em um
+	// único round-trip: streak, sessão ativa resolvida com nome, report
+	// agregado, série diária e hábitos. ?days=N controla a janela.
+	e.GET("/api/summary", func(c echo.Context) error {
+		days, err := strconv.Atoi(c.QueryParam("days"))
+		if err != nil || days < 1 || days > 365 {
+			days = 7
+		}
+		since := time.Now().AddDate(0, 0, -days).Unix()
+		ctx := c.Request().Context()
+
+		d, err := focusStatusPayload(ctx, store) // hábitos + sessão ativa + nome
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		rows, err := store.ActivityReport(ctx, since)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		daily, err := store.DailyActivity(ctx, since)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		streak, err := store.Streak(ctx)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		fmin, fsess, err := store.FocusTotals(ctx, since)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+
+		s := apiSummary{
+			Days: days, Streak: streak, Report: rows, Daily: daily,
+			FocusMinutes: fmin, FocusSessions: fsess,
+			Habits: make([]apiHabit, 0, len(d.Habits)),
+		}
+		for _, h := range d.Habits {
+			s.Habits = append(s.Habits, apiHabit{ID: h.ID, Name: h.Name})
+		}
+		if d.Active != nil {
+			s.Active = &apiActive{HabitID: d.Active.HabitID, HabitName: d.HabitName, Minutes: d.Minutes}
+		}
+		return c.JSON(http.StatusOK, s)
 	})
 
 	// GET /streak — dias locais consecutivos com atividade, como inteiro em
