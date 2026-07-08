@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# scripts/demo_seed.sh — prepara o ambiente ISOLADO do demo.gif e grava os
-# exports em /tmp/focusd_demo.env (que o demo.tape carrega em um instante —
+# scripts/demo_seed.sh — prepara o ambiente ISOLADO dos demos e grava os
+# exports em /tmp/focusd_demo.env (que as fitas carregam em um instante —
 # nada pesado roda DURANTE a gravação do VHS).
 #
-# Uso:  ./scripts/demo_seed.sh && vhs demo.tape
+# Uso:  ./scripts/demo_seed.sh && vhs demo.tape       (hook + report)
+#       ./scripts/demo_seed.sh && vhs demo_tui.tape   (dashboard interativo)
 #
 # Nada aqui toca o focusd real do usuário: socket, lock (XDG_RUNTIME_DIR),
 # banco e binário vivem todos num mktemp descartável. Os dados semeados são
@@ -29,12 +30,15 @@ python3 - <<'EOF' > "$DEMO/seed.json"
 import json, time
 now = int(time.time())
 hbs = []
+# minutos de go por dia, variados de propósito: barras iguais não contam
+# história nenhuma no gráfico do dashboard
+go_by_day = [52, 34, 61, 18, 73, 41, 27, 55, 38, 66, 22, 48]
 for d in range(12):
     day = now - d * 86400
-    for m in range(45):
+    for m in range(go_by_day[d]):
         hbs.append({"project": "myapp", "file": "api.go", "language": "go",
                     "events": 7, "at": day - 3600 - m * 60})
-    for m in range(12):
+    for m in range(6 + (d * 5) % 14):
         hbs.append({"project": "myapp", "file": "conf.lua", "language": "lua",
                     "events": 3, "at": day - 14400 - m * 60})
     if d % 3 == 0:
@@ -45,6 +49,7 @@ EOF
 curl -s --unix-socket "$FOCUSD_SOCK" -H 'Content-Type: application/json' \
   -d @"$DEMO/seed.json" http://localhost/heartbeat > /dev/null
 curl -s --unix-socket "$FOCUSD_SOCK" -d 'name=Deep Work' http://localhost/habits > /dev/null
+curl -s --unix-socket "$FOCUSD_SOCK" -d 'name=Writing' http://localhost/habits > /dev/null
 curl -s --unix-socket "$FOCUSD_SOCK" -d 'habit_id=1&duration_minutes=52' http://localhost/focus > /dev/null
 curl -s --unix-socket "$FOCUSD_SOCK" -d 'habit_id=1&duration_minutes=45' http://localhost/focus > /dev/null
 

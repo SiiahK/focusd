@@ -6,7 +6,7 @@
 > tmux status bar, Neovim plugin, one small Go binary. No cloud. No account.
 > Nothing ever leaves your machine.
 
-![focusd demo: hook install, commit streak, weekly report](https://raw.githubusercontent.com/SiiahK/focusd/main/docs/demo.gif)
+![focusd tui: live focus session, streak and daily activity dashboard](https://raw.githubusercontent.com/SiiahK/focusd/main/docs/demo_tui.gif)
 
 Prefere português? Leia o [manifesto](docs/manifesto.md).
 
@@ -37,6 +37,8 @@ Every `git commit` now answers back:
 
 The hook never blocks or fails a commit: hard 250ms budget, silent when the
 daemon is unreachable.
+
+![focusd hook and report demo](https://raw.githubusercontent.com/SiiahK/focusd/main/docs/demo.gif)
 
 ## Where did my week go?
 
