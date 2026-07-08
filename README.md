@@ -6,6 +6,8 @@
 > tmux status bar, Neovim plugin, one small Go binary. No cloud. No account.
 > Nothing ever leaves your machine.
 
+![focusd demo: hook install, commit streak, weekly report](https://raw.githubusercontent.com/SiiahK/focusd/main/docs/demo.gif)
+
 Prefere português? Leia o [manifesto](docs/manifesto.md).
 
 ## Why
