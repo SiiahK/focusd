@@ -132,6 +132,12 @@ func renderFocusStatus(c echo.Context, store *Store) error {
 }
 
 func main() {
+	// Com subcomando o binário é CLI (cli.go); sem argumentos, é o daemon.
+	if len(os.Args) > 1 {
+		runCLI(os.Args[1:])
+		return
+	}
+
 	// Instância única (flock): se outro focusd já roda, saímos limpos e
 	// SILENCIOSOS (exit 0). É disto que o autospawn dos clientes depende —
 	// dois disparos simultâneos: um vence o lock, o outro sai sem ruído.
@@ -410,6 +416,16 @@ func main() {
 			return c.String(http.StatusOK, "Nenhum foco ativo")
 		}
 		return c.String(http.StatusOK, statusText(active))
+	})
+
+	// GET /streak — dias locais consecutivos com atividade, como inteiro em
+	// texto puro. Consumido pelo hook de commit para compor a mensagem.
+	e.GET("/streak", func(c echo.Context) error {
+		n, err := store.Streak(c.Request().Context())
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		return c.String(http.StatusOK, strconv.Itoa(n))
 	})
 
 	// Graceful shutdown: SIGINT/SIGTERM (o `focusd stop` manda SIGTERM) drenam as

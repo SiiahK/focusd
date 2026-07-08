@@ -327,6 +327,45 @@ func (s *Store) AddSuspendedSecs(ctx context.Context, secs, startedAtMax int64) 
 	return res.RowsAffected()
 }
 
+// Streak conta os dias LOCAIS consecutivos com atividade (heartbeats ou
+// sessões de foco), terminando hoje — ou ontem, se hoje ainda não teve
+// atividade: um streak não morre à meia-noite, morre ao pular um dia.
+// Fora do caminho quente (só o hook de commit chama), então sem stmt preparado.
+func (s *Store) Streak(ctx context.Context) (int, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT date(at, 'unixepoch', 'localtime') FROM heartbeats
+		UNION
+		SELECT DISTINCT date(logged_at, 'localtime') FROM focus_logs`)
+	if err != nil {
+		return 0, fmt.Errorf("consultando dias ativos: %w", err)
+	}
+	defer rows.Close()
+
+	days := make(map[string]bool)
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			return 0, fmt.Errorf("lendo dia ativo: %w", err)
+		}
+		days[d] = true
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterando dias ativos: %w", err)
+	}
+
+	const layout = "2006-01-02"
+	day := time.Now()
+	if !days[day.Format(layout)] {
+		day = day.AddDate(0, 0, -1)
+	}
+	n := 0
+	for days[day.Format(layout)] {
+		n++
+		day = day.AddDate(0, 0, -1)
+	}
+	return n, nil
+}
+
 // clip limita campos de texto vindos da rede a um tamanho são — heartbeat é
 // telemetria, não lugar para alguém estacionar um path de 1MB no banco.
 func clip(v string) string {

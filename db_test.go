@@ -156,6 +156,50 @@ func TestInsertHeartbeats(t *testing.T) {
 	}
 }
 
+// TestStreak cobre a contagem de dias consecutivos com atividade, incluindo
+// a regra "hoje vazio não mata o streak de ontem" e o corte em dia pulado.
+func TestStreak(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	n, err := s.Streak(ctx)
+	if err != nil || n != 0 {
+		t.Fatalf("banco vazio: esperava streak 0, veio %d (%v)", n, err)
+	}
+
+	// Atividade ontem e anteontem via focus_logs; nada hoje → streak 2 vivo.
+	id, _ := s.CreateHabit(ctx, "Codar", "", "daily")
+	for _, ago := range []string{"-1 day", "-2 days"} {
+		if _, err := s.db.Exec(
+			`INSERT INTO focus_logs (habit_id, duration_minutes, logged_at) VALUES (?, 1, datetime('now', ?))`,
+			id, ago,
+		); err != nil {
+			t.Fatalf("inserindo log retroativo: %v", err)
+		}
+	}
+	if n, _ = s.Streak(ctx); n != 2 {
+		t.Fatalf("ontem+anteontem: esperava streak 2, veio %d", n)
+	}
+
+	// Heartbeat hoje (como o hook de commit faz) → streak 3.
+	if err := s.InsertHeartbeats(ctx, "git", []Heartbeat{{Project: "focusd", Events: 1, At: time.Now().Unix()}}); err != nil {
+		t.Fatalf("InsertHeartbeats: %v", err)
+	}
+	if n, _ = s.Streak(ctx); n != 3 {
+		t.Fatalf("com hoje: esperava streak 3, veio %d", n)
+	}
+
+	// Dia pulado corta: atividade há 5 dias não estica o streak atual.
+	if _, err := s.db.Exec(
+		`INSERT INTO focus_logs (habit_id, duration_minutes, logged_at) VALUES (?, 1, datetime('now', '-5 days'))`, id,
+	); err != nil {
+		t.Fatalf("inserindo log antigo: %v", err)
+	}
+	if n, _ = s.Streak(ctx); n != 3 {
+		t.Fatalf("dia pulado deveria cortar: esperava 3, veio %d", n)
+	}
+}
+
 // TestConcurrencyNoLock martela o banco de várias goroutines para provar que
 // SetMaxOpenConns(1) + busy_timeout eliminam o "database is locked".
 func TestConcurrencyNoLock(t *testing.T) {
