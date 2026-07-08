@@ -1,4 +1,4 @@
-module focus-tracker
+module github.com/SiiahK/focusd
 
 go 1.26.4
 
