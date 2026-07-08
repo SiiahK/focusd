@@ -1,0 +1,42 @@
+# goreleaser v2 — binários estáticos por SO/arquitetura em cada tag v*.
+# CGO_ENABLED=0 é a colheita da Fase 1 (SQLite puro-Go): cross-compila tudo
+# de qualquer lugar, sem toolchain de C.
+version: 2
+
+project_name: focusd
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - focus_status.sh
+      - tmux_focus.sh
+      # os dois padrões são necessários: `*` pega o README na raiz do plugin,
+      # `**/*` pega a árvore lua/ (o ** do goreleaser não casa profundidade 1)
+      - focusd.nvim/*
+      - focusd.nvim/**/*
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^test:"

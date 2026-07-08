@@ -18,3 +18,4 @@ release_v1/
 # estado de automações locais
 marketing_state.json
 launch_artifacts.json
+dist/
