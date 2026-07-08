@@ -1,0 +1,20 @@
+.env
+gumroad_session.json
+launch/bot_debug/
+.sales_monitor_state
+
+# bancos locais (produto + CRM de growth) — nunca commitar
+growth.db
+focus.db
+focus.db-shm
+focus.db-wal
+
+# binários e artefatos de build/release
+focusd
+focus-tracker
+*.zip
+release_v1/
+
+# estado de automações locais
+marketing_state.json
+launch_artifacts.json
